@@ -124,7 +124,8 @@ app.post('/api/users/me', verifyFirebaseToken, async (req, res) => {
 app.post('/api/users/me/subscription', verifyFirebaseToken, async (req, res) => {
     try {
         const { method = '', months = 1 } = req.body || {};
-        const expiry = Date.now() + months * 30L * 24 * 60 * 60 * 1000;
+        //const expiry = Date.now() + months * 30L * 24 * 60 * 60 * 1000;
+        const expiry = Date.now() + months * 30 * 24 * 60 * 60 * 1000;
         await db.collection('users').updateOne(
             { uid: req.user.uid },
             {
