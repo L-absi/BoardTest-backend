@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const admin = require('firebase-admin');
-const { MongoClient, ObjectId } = require('mongodb');
+const { MongoClient } = require('mongodb');
 const cors = require('cors');
 
 const app = express();
@@ -27,12 +27,26 @@ async function connectToMongo() {
     });
     await client.connect();
     db = client.db(DB_NAME);
-    // فهارس مفيدة
+
     await db.collection('users').createIndex({ uid: 1 }, { unique: true });
     await db.collection('sessions').createIndex({ uid: 1, sessionId: 1 }, { unique: true });
     await db.collection('sessions').createIndex({ uid: 1, updatedAt: -1 });
+
+    // تأكد من وجود مستند الإعدادات
+    const existing = await db.collection('config').findOne({ _id: 'free_access' });
+    if (!existing) {
+        await db.collection('config').insertOne({
+            _id: 'free_access',
+            freeReferences: [],
+            freeTopics: [],
+            updatedAt: Date.now()
+        });
+        console.log('🆕 Initialized default free_access config');
+    }
+
     console.log('✅ MongoDB connected');
 }
+
 connectToMongo().catch(err => {
     console.error('❌ MongoDB connection failed:', err);
     process.exit(1);
@@ -68,19 +82,17 @@ app.get('/health', (req, res) =>
 
 // ───────────── Users ─────────────
 
-// قراءة ملفي الشخصي
 app.get('/api/users/me', verifyFirebaseToken, async (req, res) => {
     try {
         const user = await db.collection('users').findOne({ uid: req.user.uid });
         if (!user) return res.status(404).json({ error: 'Profile not found' });
-        delete user._id; // لا نرسل ObjectId للتطبيق
+        delete user._id;
         res.json(user);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// إنشاء/تحديث ملفي الشخصي
 app.post('/api/users/me', verifyFirebaseToken, async (req, res) => {
     try {
         const {
@@ -90,26 +102,27 @@ app.post('/api/users/me', verifyFirebaseToken, async (req, res) => {
         } = req.body || {};
 
         const now = Date.now();
-        const update = {
-            $set: {
-                uid: req.user.uid,
-                email: req.user.email || '',
-                firstName, lastName, phone,
-                specialty, trainingProgram, level,
-                photoUrl, profileComplete,
-                updatedAt: now
-            },
-            $setOnInsert: {
-                isPro: false,
-                isAdmin: false,
-                subscriptionType: '',
-                subscriptionMethod: '',
-                subscriptionExpiry: 0,
-                createdAt: now
-            }
-        };
         await db.collection('users').updateOne(
-            { uid: req.user.uid }, update, { upsert: true }
+            { uid: req.user.uid },
+            {
+                $set: {
+                    uid: req.user.uid,
+                    email: req.user.email || '',
+                    firstName, lastName, phone,
+                    specialty, trainingProgram, level,
+                    photoUrl, profileComplete,
+                    updatedAt: now
+                },
+                $setOnInsert: {
+                    isPro: false,
+                    isAdmin: false,
+                    subscriptionType: '',
+                    subscriptionMethod: '',
+                    subscriptionExpiry: 0,
+                    createdAt: now
+                }
+            },
+            { upsert: true }
         );
 
         const saved = await db.collection('users').findOne({ uid: req.user.uid });
@@ -120,11 +133,9 @@ app.post('/api/users/me', verifyFirebaseToken, async (req, res) => {
     }
 });
 
-// تفعيل اشتراك
 app.post('/api/users/me/subscription', verifyFirebaseToken, async (req, res) => {
     try {
         const { method = '', months = 1 } = req.body || {};
-        //const expiry = Date.now() + months * 30L * 24 * 60 * 60 * 1000;
         const expiry = Date.now() + months * 30 * 24 * 60 * 60 * 1000;
         await db.collection('users').updateOne(
             { uid: req.user.uid },
@@ -146,7 +157,6 @@ app.post('/api/users/me/subscription', verifyFirebaseToken, async (req, res) => 
     }
 });
 
-// قائمة كل المستخدمين (admin)
 app.get('/api/users', verifyFirebaseToken, requireAdmin, async (req, res) => {
     try {
         const users = await db.collection('users')
@@ -163,7 +173,6 @@ app.get('/api/users', verifyFirebaseToken, requireAdmin, async (req, res) => {
 
 // ───────────── Sessions ─────────────
 
-// قائمة جلساتي
 app.get('/api/sessions', verifyFirebaseToken, async (req, res) => {
     try {
         const sessions = await db.collection('sessions')
@@ -178,7 +187,6 @@ app.get('/api/sessions', verifyFirebaseToken, async (req, res) => {
     }
 });
 
-// حفظ/تحديث جلسة
 app.post('/api/sessions', verifyFirebaseToken, async (req, res) => {
     try {
         const {
@@ -211,25 +219,36 @@ app.post('/api/sessions', verifyFirebaseToken, async (req, res) => {
 });
 
 // ───────────── Config / free_access ─────────────
-
+// GET: متاح لأي مستخدم مصادق عليه (التطبيق يحتاجه لمعرفة المراجع المجانية)
 app.get('/api/config/free_access', verifyFirebaseToken, async (req, res) => {
     try {
-        const cfg = await db.collection('config').findOne({ _id: 'free_access' });
+        let cfg = await db.collection('config').findOne({ _id: 'free_access' });
+        if (!cfg) {
+            // احتياطي: أعد افتراضيًا فارغًا
+            return res.json({ freeReferences: [], freeTopics: [] });
+        }
         res.json({
-            freeReferences: cfg?.freeReferences || [],
-            freeTopics: cfg?.freeTopics || []
+            freeReferences: cfg.freeReferences || [],
+            freeTopics: cfg.freeTopics || []
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
+// PUT: للأدمن فقط (لإضافة/تعديل المراجع المجانية)
 app.put('/api/config/free_access', verifyFirebaseToken, requireAdmin, async (req, res) => {
     try {
         const { freeReferences = [], freeTopics = [] } = req.body || {};
         await db.collection('config').updateOne(
             { _id: 'free_access' },
-            { $set: { freeReferences, freeTopics, updatedAt: Date.now() } },
+            {
+                $set: {
+                    freeReferences,
+                    freeTopics,
+                    updatedAt: Date.now()
+                }
+            },
             { upsert: true }
         );
         res.json({ ok: true, freeReferences, freeTopics });
@@ -238,7 +257,7 @@ app.put('/api/config/free_access', verifyFirebaseToken, requireAdmin, async (req
     }
 });
 
-// ───────────── Questions (كما هي) ─────────────
+// ───────────── Questions ─────────────
 
 app.get('/api/references/summary', verifyFirebaseToken, async (req, res) => {
     try {
