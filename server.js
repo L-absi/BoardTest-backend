@@ -33,6 +33,7 @@ async function connectToMongo() {
     await db.collection('sessions').createIndex({ uid: 1, updatedAt: -1 });
     await db.collection('notifications').createIndex({ timestamp: -1 });
 
+    // ── free_access ──
     const existing = await db.collection('config').findOne({ _id: 'free_access' });
     if (!existing) {
         await db.collection('config').insertOne({
@@ -41,7 +42,24 @@ async function connectToMongo() {
             freeTopics: [],
             updatedAt: Date.now()
         });
+        console.log('🆕 Initialized default free_access config');
     }
+
+    // ── app_version ✅ جديد ──
+    const hasVersion = await db.collection('config').findOne({ _id: 'app_version' });
+    if (!hasVersion) {
+        await db.collection('config').insertOne({
+            _id: 'app_version',
+            latestVersionCode: 0,
+            latestVersionName: "",
+            updateUrl: "",
+            releaseNotes: "",
+            forceUpdate: false,
+            updatedAt: Date.now()
+        });
+        console.log('🆕 Initialized default app_version config');
+    }
+
     console.log('✅ MongoDB connected');
 }
 
