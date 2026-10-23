@@ -74,7 +74,30 @@ app.get('/health', (req, res) =>
 );
 
 // ───────────── Users ─────────────
-
+// ───────────── App Version (public) ─────────────
+app.get('/api/config/app_version', async (req, res) => {
+    try {
+        const cfg = await db.collection('config').findOne({ _id: 'app_version' });
+        if (!cfg) {
+            return res.json({
+                latestVersionCode: 0,
+                latestVersionName: "",
+                updateUrl: "",
+                releaseNotes: "",
+                forceUpdate: false
+            });
+        }
+        res.json({
+            latestVersionCode: cfg.latestVersionCode || 0,
+            latestVersionName: cfg.latestVersionName || "",
+            updateUrl: cfg.updateUrl || "",
+            releaseNotes: cfg.releaseNotes || "",
+            forceUpdate: cfg.forceUpdate === true
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 app.get('/api/users/me', verifyFirebaseToken, async (req, res) => {
     try {
         const user = await db.collection('users').findOne({ uid: req.user.uid });
