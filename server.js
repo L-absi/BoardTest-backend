@@ -252,13 +252,19 @@ app.post('/api/sessions', verifyFirebaseToken, async (req, res) => {
 
 // ───────────── Notifications (MongoDB + FCM) ─────────────
 
-// قراءة الإشعارات
 app.get('/api/notifications', verifyFirebaseToken, async (req, res) => {
     try {
         const list = await db.collection('notifications')
             .find({}).sort({ timestamp: -1 }).limit(100).toArray();
-        list.forEach(n => delete n._id);
-        res.json(list);
+        res.json(list.map(n => ({
+            id: String(n._id),
+            title: n.title || '',
+            body: n.body || '',
+            actionUrl: n.actionUrl || '',
+            actionLabel: n.actionLabel || '',
+            imageUrl: n.imageUrl || '',
+            timestamp: n.timestamp || 0
+        })));
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
