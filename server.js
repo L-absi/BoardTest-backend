@@ -143,11 +143,23 @@ app.post('/api/users/me/fcm-token', verifyFirebaseToken, async (req, res) => {
         if (!token) return res.status(400).json({ error: 'token required' });
         await db.collection('users').updateOne(
             { uid: req.user.uid },
-            { $addToSet: { fcmTokens: token } }
+            {
+                $addToSet: { fcmTokens: token },
+                $setOnInsert: {
+                    uid: req.user.uid,
+                    email: req.user.email || '',
+                    isPro: false,
+                    isAdmin: false,
+                    profileComplete: false,
+                    createdAt: Date.now()
+                }
+            },
+            { upsert: true }
         );
         res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
 
 // ─── جديد: حذف FCM token عند تسجيل الخروج ───
 app.delete('/api/users/me/fcm-token', verifyFirebaseToken, async (req, res) => {
